@@ -1,19 +1,27 @@
-import random
-from flashtext import KeywordProcessor
-import traceback  # for exception handling
-import pke  # for multipartite rank
-import string  # for enumerating punctuations
-from nltk.tokenize import sent_tokenize
-import nltk
-# from fastT5 import get_onnx_model, get_onnx_runtime_sessions, OnnxT5
-from transformers import AutoTokenizer
-from pathlib import Path
-import os
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import List
-import torch
 from transformers import T5ForConditionalGeneration, T5Tokenizer
+import torch
+from typing import List
+from pydantic import BaseModel
+from fastapi import FastAPI
+import os
+from pathlib import Path
+from transformers import AutoTokenizer
+import nltk
+from nltk.tokenize import sent_tokenize
+import string  # for enumerating punctuations
+import pke  # for multipartite rank
+import traceback  # for exception handling
+from flashtext import KeywordProcessor
+import random
+import numpy as np
+# from sense2vec import Sense2Vec
+# s2v = Sense2Vec().from_disk('s2v_old')
+nltk.download('wordnet')
+from nltk.corpus import wordnet as wn
+# from sentence_transformers import SentenceTransformer
+from similarity.normalized_levenshtein import NormalizedLevenshtein
+from collections import OrderedDict
+from sklearn.metrics.pairwise import cosine_similarity
 
 app = FastAPI()
 
@@ -122,26 +130,6 @@ def get_imp_keywords(summarytext, keywords):
 
     return important_keywords
 
-
-# QUESTION GENERATION
-# trained_model_path = './t5_squad_v1/'
-
-# pretrained_model_name = Path(trained_model_path).stem
-
-
-# encoder_path = os.path.join(
-#     trained_model_path, f"{pretrained_model_name}-encoder-quantized.onnx")
-# decoder_path = os.path.join(
-#     trained_model_path, f"{pretrained_model_name}-decoder-quantized.onnx")
-# init_decoder_path = os.path.join(
-#     trained_model_path, f"{pretrained_model_name}-init-decoder-quantized.onnx")
-
-# model_paths = encoder_path, decoder_path, init_decoder_path
-# model_sessions = get_onnx_runtime_sessions(model_paths)
-# question_model = OnnxT5(trained_model_path, model_sessions)
-
-# question_tokenizer = AutoTokenizer.from_pretrained(trained_model_path)
-
 question_model = T5ForConditionalGeneration.from_pretrained(
     'ramsrigouthamg/t5_squad_v1')
 question_tokenizer = T5Tokenizer.from_pretrained('ramsrigouthamg/t5_squad_v1')
@@ -168,29 +156,118 @@ def get_question(context, answer, model, tokenizer):
     Question = Question.strip()
     return Question
 
+# DISTRACTOR RETRIEVAL
+# sentence_transformer_model = SentenceTransformer('msmarco-distilbert-base-v3')
+# normalized_levenshtein = NormalizedLevenshtein()
 
-# def get_question(sentence, answer, mdl, tknizer):
-#     text = "context: {} answer: {}".format(sentence, answer)
-#     print(text)
-#     max_len = 256
-#     encoding = tknizer.encode_plus(
-#         text, max_length=max_len, pad_to_max_length=False, truncation=True, return_tensors="pt")
+# def filter_same_sense_words(original, wordlist):
+#   filtered_words = []
+#   base_sense = original.split('|')[1] 
+#   print(base_sense)
+#   for eachword in wordlist:
+#     if eachword[0].split('|')[1] == base_sense:
+#       filtered_words.append(eachword[0].split('|')[0].replace("_", " ").title().strip())
+#   return filtered_words
 
-#     input_ids, attention_mask = encoding["input_ids"], encoding["attention_mask"]
+# def get_highest_similarity_score(wordlist, wrd):
+#   score = []
+#   for each in wordlist:
+#     score.append(normalized_levenshtein.similarity(each.lower(), wrd.lower()))
+#   return max(score)
 
-#     outs = mdl.generate(input_ids=input_ids,
-#                         attention_mask=attention_mask,
-#                         early_stopping=True,
-#                         num_beams=5,
-#                         num_return_sequences=1,
-#                         no_repeat_ngram_size=2,
-#                         max_length=128)
+# def sense2vec_get_words(word, s2v, topn, question):
+#     output = []
+#     try:
+#       sense = s2v.get_best_sense(word, senses=["NOUN", "PERSON", "PRODUCT", "LOC", "ORG", "EVENT", "NORP", "WORK OF ART", "FAC", "GPE", "NUM", "FACILITY"])
+#       most_similar = s2v.most_similar(sense, n=topn)
+#       output = filter_same_sense_words(sense, most_similar)
+#     except:
+#       output = []
 
-#     dec = [tknizer.decode(ids, skip_special_tokens=True) for ids in outs]
+#     threshold = 0.6
+#     final = [word]
+#     checklist = question.split()
+#     for x in output:
+#       if get_highest_similarity_score(final,x) < threshold and x not in final and x not in checklist:
+#         final.append(x)
+    
+#     return final[1:]
 
-#     Question = dec[0].replace("question:", "")
-#     Question = Question.strip()
-#     return Question
+# def mmr(doc_embedding, word_embeddings, words, top_n, lambda_param):
+
+#     # Extract similarity within words, and between words and the document
+#     word_doc_similarity = cosine_similarity(word_embeddings, doc_embedding)
+#     word_similarity = cosine_similarity(word_embeddings)
+
+#     # Initialize candidates and already choose best keyword/keyphrase
+#     keywords_idx = [np.argmax(word_doc_similarity)]
+#     candidates_idx = [i for i in range(len(words)) if i != keywords_idx[0]]
+
+#     for _ in range(top_n - 1):
+#         # Extract similarities within candidates and
+#         # between candidates and selected keywords/phrases
+#         candidate_similarities = word_doc_similarity[candidates_idx, :]
+#         target_similarities = np.max(word_similarity[candidates_idx][:, keywords_idx], axis=1)
+
+#         # Calculate MMR
+#         mmr = (lambda_param) * candidate_similarities - (1-lambda_param) * target_similarities.reshape(-1, 1)
+#         mmr_idx = candidates_idx[np.argmax(mmr)]
+
+#         # Update keywords & candidates
+#         keywords_idx.append(mmr_idx)
+#         candidates_idx.remove(mmr_idx)
+
+#     return [words[idx] for idx in keywords_idx]
+
+nltk.download('omw-1.4')
+
+def get_distractors_wordnet(word):
+    distractors = []
+    try:
+      syn = wn.synsets(word,'n')[0]
+      
+      word = word.lower()
+      orig_word = word
+      if len(word.split()) > 0:
+          word = word.replace(" ","_")
+      hypernym = syn.hypernyms()
+      if len(hypernym) == 0: 
+          return distractors
+      for item in hypernym[0].hyponyms():
+          name = item.lemmas()[0].name()
+
+          if name == orig_word:
+              continue
+          name = name.replace("_"," ")
+          name = " ".join(w.capitalize() for w in name.split())
+          if name is not None and name not in distractors:
+              distractors.append(name)
+    except:
+      print ("Wordnet distractors not found")
+    return distractors
+
+# def get_distractors(word, origsentence, sense2vecmodel, top_n, lambdaval):
+#   distractors = sense2vec_get_words(word, sense2vecmodel, top_n, origsentence)
+#   return distractors
+#   if len(distractors) == 0:
+#     return distractors
+#   distractors_new = [word.capitalize()]
+#   distractors_new.extend(distractors)
+
+#   embedding_sentence = origsentence + " " + word.capitalize()
+#   keyword_embedding = sentencemodel.encode([embedding_sentence])
+#   distractor_embeddings = sentencemodel.encode(distractors_new)
+
+#   max_keywords = min(len(distractors_new), 5)
+#   filtered_keywords = mmr(keyword_embedding, distractor_embeddings, distractors_new, max_keywords, lambdaval)
+
+#   final = [word.capitalize()]
+#   for wrd in filtered_keywords:
+#     if wrd.lower() !=word.lower():
+#       final.append(wrd.capitalize())
+#   final = final[1:]
+#   return final
+
 
 def generate_quiz(text):
     summarized_text = summarizer(text, summary_model, summary_tokenizer)
@@ -211,7 +288,16 @@ def generate_quiz(text):
         generated_question['question'] = get_question(
             summarized_text, imp_keywords_p1[answer_ind], question_model, question_tokenizer)
         generated_question['answer'] = imp_keywords_p1[answer_ind].capitalize()
-        generated_question['choices'] = []
+        generated_question['choices'] = get_distractors_wordnet(imp_keywords_p1[answer_ind])[:3]
+        generated_question['choices'].append(imp_keywords_p1[answer_ind].capitalize())
+        # if len(generated_question['choices']) < 4:
+        #   generated_question['choices'] = get_distractors(imp_keywords_p1[answer_ind], questions[answer_ind], s2v, 40, 0.2)[:3]
+        #   generated_question['choices'].append(imp_keywords_p1[answer_ind].capitalize())
+        while len(generated_question['choices']) < 4:
+          rand_word = random.choice(keywords).capitalize()
+          if rand_word in generated_question['choices']:
+            continue
+          generated_question['choices'].append(rand_word)
         random.shuffle(generated_question['choices'])
         generated_question_list.append(generated_question)
     return generated_question_list

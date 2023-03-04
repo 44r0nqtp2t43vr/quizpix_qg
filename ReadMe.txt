@@ -5,6 +5,7 @@ Docker base image and installation details: https://github.com/tiangolo/uvicorn-
 
 docker build -t question_generation .
 docker run --name quizpix -p 80:80 question_generation
+docker run --name quizpix -p 80:80 --cpus="4" --memory=32768m --oom-kill-disable question_generation
 
 2. Postman Instructions:
 
