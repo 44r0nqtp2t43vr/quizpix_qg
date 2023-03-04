@@ -19,9 +19,11 @@ import numpy as np
 nltk.download('wordnet')
 from nltk.corpus import wordnet as wn
 # from sentence_transformers import SentenceTransformer
-from similarity.normalized_levenshtein import NormalizedLevenshtein
-from collections import OrderedDict
-from sklearn.metrics.pairwise import cosine_similarity
+# from similarity.normalized_levenshtein import NormalizedLevenshtein
+# from collections import OrderedDict
+# from sklearn.metrics.pairwise import cosine_similarity
+import re
+
 
 app = FastAPI()
 
@@ -268,6 +270,49 @@ def get_distractors_wordnet(word):
 #   final = final[1:]
 #   return final
 
+#FITBQ Generation
+def tokenize_sentences(text):
+    text = text.strip().replace("\n"," ")
+    sentences = sent_tokenize(text)
+    sentences = [sentence.strip() for sentence in sentences if len(sentence) > 20]
+    return sentences
+
+def get_sentences_for_keyword(keywords, sentences):
+    keyword_processor = KeywordProcessor()
+    keyword_sentences = {}
+    for word in keywords:
+        keyword_sentences[word] = []
+        keyword_processor.add_keyword(word)
+    for sentence in sentences:
+        keywords_found = keyword_processor.extract_keywords(sentence)
+        for key in keywords_found:
+            keyword_sentences[key].append(sentence)
+
+    for key in keyword_sentences.keys():
+        values = keyword_sentences[key]
+        values = sorted(values, key=len, reverse=True)
+        keyword_sentences[key] = values
+    return keyword_sentences
+
+def get_fill_in_the_blanks(sentence_mapping):
+    out = {}
+    blank_sentences = []
+    processed = []
+    keys = []
+    for key in sentence_mapping:
+        if len(sentence_mapping[key]) > 0:
+            sent = sentence_mapping[key][0]
+            # Compile a regular expression pattern into a regular expression object, which can be used for matching and other methods
+            insensitive_sent = re.compile(re.escape(key), re.IGNORECASE)
+            no_of_replacements =  len(re.findall(re.escape(key), sent, re.IGNORECASE))
+            line = insensitive_sent.sub(' _________ ', sent)
+            if (sentence_mapping[key][0] not in processed) and no_of_replacements < 2:
+                blank_sentences.append(line)
+                processed.append(sentence_mapping[key][0])
+                keys.append(key)
+    out["sentences"] = blank_sentences
+    out["keys"] = keys
+    return out
 
 def generate_quiz(text):
     summarized_text = summarizer(text, summary_model, summary_tokenizer)
@@ -290,15 +335,23 @@ def generate_quiz(text):
         generated_question['answer'] = imp_keywords_p1[answer_ind].capitalize()
         generated_question['choices'] = get_distractors_wordnet(imp_keywords_p1[answer_ind])[:3]
         generated_question['choices'].append(imp_keywords_p1[answer_ind].capitalize())
-        # if len(generated_question['choices']) < 4:
-        #   generated_question['choices'] = get_distractors(imp_keywords_p1[answer_ind], questions[answer_ind], s2v, 40, 0.2)[:3]
-        #   generated_question['choices'].append(imp_keywords_p1[answer_ind].capitalize())
         while len(generated_question['choices']) < 4:
           rand_word = random.choice(keywords).capitalize()
           if rand_word in generated_question['choices']:
             continue
           generated_question['choices'].append(rand_word)
         random.shuffle(generated_question['choices'])
+        generated_question_list.append(generated_question)
+    
+    sentences = tokenize_sentences(text)
+    iden_keyword_sentence_mapping = get_sentences_for_keyword(imp_keywords_p2, sentences)
+    fill_in_the_blanks = get_fill_in_the_blanks(iden_keyword_sentence_mapping)
+    for ind in range(len(fill_in_the_blanks['sentences'])):
+        generated_question = {}
+        generated_question['type'] = 'identification'
+        generated_question['question'] = fill_in_the_blanks['sentences'][ind]
+        generated_question['answer'] = fill_in_the_blanks['keys'][ind]
+        generated_question['choices'] = []
         generated_question_list.append(generated_question)
     return generated_question_list
 
