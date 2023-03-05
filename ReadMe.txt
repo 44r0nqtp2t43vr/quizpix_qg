@@ -24,13 +24,13 @@ Create a project on gcloud console.
 Install Gcloud SDK from https://cloud.google.com/sdk/docs/quickstart
 gcloud init
 
-docker build . --tag gcr.io/question-generation-312318/question-generation:latest
+docker build . --tag gcr.io/quizpix/question-generation:latest
 
 
 https://cloud.google.com/container-registry/docs/advanced-authentication
 gcloud auth configure-docker
 
-docker push gcr.io/question-generation-312318/question-generation:latest
+docker push gcr.io/quizpix/question-generation:latest
 
 4. Deploy API using Google Cloud Run
 
@@ -39,7 +39,7 @@ gcloud init  ---> Choose re-initialize this configuration [default] with new set
 
 Parameters: https://cloud.google.com/sdk/gcloud/reference/run/deploy
 
-gcloud run deploy --image gcr.io/question-generation-312318/question-generation:latest --cpu 2 --concurrency 1 --memory 4Gi --platform managed --min-instances 0 --timeout 1m --port 80
+gcloud run deploy --image gcr.io/quizpix/question-generation:latest --cpu 2 --concurrency 1 --memory 4Gi --platform managed --min-instances 0 --timeout 1m --port 80
 
 
 5. Postman Instructions:

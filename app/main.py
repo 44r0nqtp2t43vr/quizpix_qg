@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from fastapi import FastAPI
 import os
 from pathlib import Path
-from transformers import AutoTokenizer
+from transformers import TFGPT2LMHeadModel, GPT2Tokenizer
 import nltk
 from nltk.tokenize import sent_tokenize
 import string  # for enumerating punctuations
@@ -23,6 +23,9 @@ from nltk.corpus import wordnet as wn
 # from collections import OrderedDict
 # from sklearn.metrics.pairwise import cosine_similarity
 import re
+import tensorflow as tf
+from nltk.tokenize import word_tokenize
+from nltk import tokenize
 
 
 app = FastAPI()
@@ -314,6 +317,89 @@ def get_fill_in_the_blanks(sentence_mapping):
     out["keys"] = keys
     return out
 
+# T/FQ Generation
+
+#initialize GPT2 tokenizer and model for generating sentences
+GPT2tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+GPT2model = TFGPT2LMHeadModel.from_pretrained("gpt2", pad_token_id = GPT2tokenizer.eos_token_id)
+
+def get_tf_sentences(sentence_mapping):
+    out = []
+    for key in sentence_mapping:
+        if len(sentence_mapping[key]) > 0:
+            sent = sentence_mapping[key][0]
+            if sent not in out:
+                out.append(sentence_mapping[key][0])
+    return out
+
+def remove_from_string(main_string, sub_string):
+    combined_sub_string = sub_string.replace(" ", "")
+    main_string_list = main_string.split()
+    last_index = len(main_string_list)
+    for i in range(last_index):
+        check_string_list = main_string_list[i:]
+        check_string = "".join(check_string_list)
+        check_string = check_string.replace(" ", "")
+        if check_string == combined_sub_string:
+            return " ".join(main_string_list[:i])
+    ind = 0
+    first_word = sub_string.split()[0]
+    while first_word not in main_string_list:
+      first_word = sub_string.split()[ind + 1]
+      ind = ind + 1
+    return " ".join(main_string_list[:main_string_list.index(first_word)])
+
+nltk.download('averaged_perceptron_tagger')
+
+def falsify_sentence(sentence):
+  sentence = sentence.rstrip('?:!.,;')
+  text = word_tokenize(sentence)
+  tagged_text = nltk.pos_tag(text)
+  words = [word[0] for word in tagged_text]
+  tags = [word[1] for word in tagged_text]
+  if ('CC' in tags) and ((len(tags) - tags[::-1].index('CC') - 1) >= len(tags)/2):
+    ind = len(tags) - tags[::-1].index('CC') - 1
+  elif ('IN' in tags) and ((len(tags) - tags[::-1].index('IN') - 1) >= len(tags)/2):
+    ind = len(tags) - tags[::-1].index('IN') - 1
+  elif ('VB' in tags) and ((len(tags) - tags[::-1].index('VB') - 1) >= len(tags)/2):
+    ind = len(tags) - tags[::-1].index('VB') - 1
+  elif ('VBD' in tags) and ((len(tags) - tags[::-1].index('VBD') - 1) >= len(tags)/2):
+    ind = len(tags) - tags[::-1].index('VBD') - 1
+  elif ('NN' in tags) and ((len(tags) - tags[::-1].index('NN') - 1) >= len(tags)/2):
+    ind = len(tags) - tags[::-1].index('NN') - 1
+  else:
+    ind = -1
+  if (tags[ind - 1] == 'NNP') or (tags[ind - 2] == 'NNP'):
+    ind = ind - 3
+  substring = " ".join(words[ind:])
+  substring = re.sub(r"-LRB- ", "(", substring)
+  substring = re.sub(r" -RRB-", ")", substring)
+  split_sentence = remove_from_string(sentence, substring)
+
+  #encode split_sentence and generate sentence using words with >= 80% probability
+  input_ids = GPT2tokenizer.encode(split_sentence, return_tensors='tf')
+
+  maximum_length = len(input_ids[0]) + 16
+  sample_outputs = GPT2model.generate(
+    input_ids, 
+    do_sample = True, 
+    max_length = maximum_length, 
+    top_p = 0.80,
+    top_k = 30,
+    repetition_penalty = 10.0,
+    num_return_sequences = 4
+  )
+  
+  #decode generated sentences
+  gen_sentences = []
+  for index, sample_output in enumerate(sample_outputs):
+    decoded_sentence = GPT2tokenizer.decode(sample_output, skip_special_tokens = True)
+    final_sentence = tokenize.sent_tokenize(decoded_sentence)[0]
+    if (final_sentence.rstrip('?:!.,;') not in sentence) or (index == len(sample_outputs) - 1):
+      gen_sentences.append(final_sentence)
+
+  return gen_sentences[0]
+
 def generate_quiz(text):
     summarized_text = summarizer(text, summary_model, summary_tokenizer)
     keywords = get_nouns_multipartite(text)
@@ -353,8 +439,23 @@ def generate_quiz(text):
         generated_question['answer'] = fill_in_the_blanks['keys'][ind]
         generated_question['choices'] = []
         generated_question_list.append(generated_question)
+    
+    all_other_keywords = [keyword for keyword in keywords if keyword not in imp_keywords]
+    other_keyword_sentence_mapping = get_sentences_for_keyword(all_other_keywords, sentences)
+    tf_sentences = get_tf_sentences(other_keyword_sentence_mapping)
+    # for sentence in tf_sentences:
+    #     generated_question = {}
+    #     generated_question['type'] = 'true_or_false'
+    #     randNum = random.randint(0, 1)
+    #     if randNum == 0:
+    #       generated_question['question'] = falsify_sentence(sentence)
+    #       generated_question['answer'] = 'false'
+    #     else:
+    #       generated_question['question'] = sentence
+    #       generated_question['answer'] = 'true'
+    #     generated_question['choices'] = []
+    #     generated_question_list.append(generated_question)
     return generated_question_list
-
 
 @app.get('/')
 def index():

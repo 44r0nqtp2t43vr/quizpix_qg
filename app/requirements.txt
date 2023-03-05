@@ -8,3 +8,4 @@ sense2vec==2.0.0
 strsim
 torch
 sentencepiece
+tensorflow
