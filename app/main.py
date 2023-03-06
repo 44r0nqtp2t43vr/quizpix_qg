@@ -320,6 +320,8 @@ def get_fill_in_the_blanks(sentence_mapping):
 # T/FQ Generation
 
 #initialize GPT2 tokenizer and model for generating sentences
+# GPT2tokenizer = GPT2Tokenizer.from_pretrained("distilgpt2")
+# GPT2model = TFGPT2LMHeadModel.from_pretrained("distilgpt2", pad_token_id = GPT2tokenizer.eos_token_id)
 GPT2tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 GPT2model = TFGPT2LMHeadModel.from_pretrained("gpt2", pad_token_id = GPT2tokenizer.eos_token_id)
 
@@ -344,10 +346,13 @@ def remove_from_string(main_string, sub_string):
             return " ".join(main_string_list[:i])
     ind = 0
     first_word = sub_string.split()[0]
-    while first_word not in main_string_list:
+    while first_word not in main_string_list and ind < last_index - 1:
       first_word = sub_string.split()[ind + 1]
       ind = ind + 1
-    return " ".join(main_string_list[:main_string_list.index(first_word)])
+    if first_word in main_string_list:
+      return " ".join(main_string_list[:main_string_list.index(first_word)])
+    else:
+      return " ".join(main_string_list[:last_index-1])
 
 nltk.download('averaged_perceptron_tagger')
 
@@ -387,18 +392,19 @@ def falsify_sentence(sentence):
     top_p = 0.80,
     top_k = 30,
     repetition_penalty = 10.0,
-    num_return_sequences = 4
+    num_return_sequences = 1
   )
   
   #decode generated sentences
-  gen_sentences = []
-  for index, sample_output in enumerate(sample_outputs):
+  #gen_sentences = []
+  for sample_output in sample_outputs:
     decoded_sentence = GPT2tokenizer.decode(sample_output, skip_special_tokens = True)
     final_sentence = tokenize.sent_tokenize(decoded_sentence)[0]
-    if (final_sentence.rstrip('?:!.,;') not in sentence) or (index == len(sample_outputs) - 1):
-      gen_sentences.append(final_sentence)
+    return final_sentence
+    # if (final_sentence.rstrip('?:!.,;') not in sentence) or (index == len(sample_outputs) - 1):
+    #   gen_sentences.append(final_sentence)
 
-  return gen_sentences[0]
+  # return gen_sentences[0]
 
 def generate_quiz(text):
     summarized_text = summarizer(text, summary_model, summary_tokenizer)
@@ -443,18 +449,18 @@ def generate_quiz(text):
     all_other_keywords = [keyword for keyword in keywords if keyword not in imp_keywords]
     other_keyword_sentence_mapping = get_sentences_for_keyword(all_other_keywords, sentences)
     tf_sentences = get_tf_sentences(other_keyword_sentence_mapping)
-    # for sentence in tf_sentences:
-    #     generated_question = {}
-    #     generated_question['type'] = 'true_or_false'
-    #     randNum = random.randint(0, 1)
-    #     if randNum == 0:
-    #       generated_question['question'] = falsify_sentence(sentence)
-    #       generated_question['answer'] = 'false'
-    #     else:
-    #       generated_question['question'] = sentence
-    #       generated_question['answer'] = 'true'
-    #     generated_question['choices'] = []
-    #     generated_question_list.append(generated_question)
+    for index, sentence in enumerate(tf_sentences):
+        generated_question = {}
+        generated_question['type'] = 'true_or_false'
+        randNum = random.randint(0, 1)
+        if randNum == 0:
+          generated_question['question'] = falsify_sentence(sentence)
+          generated_question['answer'] = 'false'
+        else:
+          generated_question['question'] = sentence
+          generated_question['answer'] = 'true'
+        generated_question['choices'] = []
+        generated_question_list.append(generated_question)
     return generated_question_list
 
 @app.get('/')
